@@ -5,6 +5,7 @@ import { mainnet } from "viem/chains";
 import { parseSiweMessage, verifySiweMessage } from "viem/siwe";
 import { consumeNonce } from "@/lib/nonce-store";
 import { getSession } from "@/lib/session";
+import { createRequestLogger } from "@/lib/log";
 
 const bodySchema = z.object({
   message: z.string().min(1).max(4096),
@@ -18,15 +19,19 @@ const publicClient = createPublicClient({
   transport: http(process.env.RPC_URL),
 });
 
-// Every failure looks identical to the client. The real reason goes to the
-// server log only, see README trap: "Any failure: 401 with a generic
-// message, log the specific reason server side."
-function deny(reason: string) {
-  console.error("siwe verify denied:", reason);
-  return NextResponse.json({ error: "sign-in failed" }, { status: 401 });
-}
-
 export async function POST(request: Request) {
+  const started = Date.now();
+  const logger = createRequestLogger({ route: "/api/auth/verify" });
+
+  // Every failure looks identical to the client. The real reason goes to
+  // the server log only, see README trap: "Any failure: 401 with a generic
+  // message, log the specific reason server side." Never the signature or
+  // message body itself, only the reason string.
+  function deny(reason: string) {
+    logger.warn("auth_denied", { reason, durationMs: Date.now() - started });
+    return NextResponse.json({ error: "sign-in failed" }, { status: 401 });
+  }
+
   const rawBody = await request.json().catch(() => null);
   const body = bodySchema.safeParse(rawBody);
   if (!body.success) return deny("malformed request body");
@@ -84,5 +89,6 @@ export async function POST(request: Request) {
   session.issuedAt = Date.now();
   await session.save();
 
+  logger.info("request", { status: 200, address, durationMs: Date.now() - started });
   return NextResponse.json({ address });
 }

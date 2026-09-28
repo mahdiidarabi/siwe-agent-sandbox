@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import type { Address } from "viem";
 import { canUse, type ToolName } from "@/lib/authz";
 import { runUntrusted } from "@/lib/sandbox";
+import type { RequestLogger } from "@/lib/log";
 
 // Descriptions the model sees. Provider-agnostic JSON Schema shape;
 // app/api/chat/route.ts adapts this into whatever tool-definition format
@@ -39,20 +41,24 @@ function isToolName(name: string): name is ToolName {
   return Object.hasOwn(TOOL_DEFS, name);
 }
 
-function logToolCall(fields: Record<string, unknown>) {
-  console.error(JSON.stringify({ event: "tool_call", ...fields }));
+// Fingerprint, not content: enough to tell "same code run again" or "how
+// big was it" apart in logs without ever writing the untrusted code itself
+// to disk.
+function fingerprintCode(code: string) {
+  return { codeLength: code.length, codeHash: createHash("sha256").update(code).digest("hex").slice(0, 16) };
 }
 
 export async function executeTool(
   address: Address,
   name: string,
   rawInput: unknown,
+  logger: RequestLogger,
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   const started = Date.now();
 
   // 1. name is a known ToolName, else deny.
   if (!isToolName(name)) {
-    logToolCall({ decision: "deny", reason: "unknown tool", tool: name, address });
+    logger.info("tool_call", { decision: "deny", reason: "unknown tool", tool: name, address });
     return { ok: false, error: "unknown tool" };
   }
 
@@ -61,35 +67,45 @@ export async function executeTool(
   // this check, not the filtered list, is the actual authorization
   // boundary.
   if (!canUse(address, name)) {
-    logToolCall({ decision: "deny", reason: "not authorized", tool: name, address });
+    logger.info("tool_call", { decision: "deny", reason: "not authorized", tool: name, address });
     return { ok: false, error: "not authorized" };
   }
 
   // 3. zod-parse rawInput, else error.
   const parsed = TOOL_ARGS[name].safeParse(rawInput);
   if (!parsed.success) {
-    logToolCall({ decision: "deny", reason: "invalid input", tool: name, address });
+    logger.info("tool_call", { decision: "deny", reason: "invalid input", tool: name, address });
     return { ok: false, error: "invalid input" };
   }
 
   // 4. execute.
-  const result: { ok: true; output: string } | { ok: false; error: string } =
-    name === "get_time"
-      ? { ok: true, output: new Date().toISOString() }
-      : await (async () => {
-          const sandboxResult = await runUntrusted((parsed.data as { code: string }).code);
-          return sandboxResult.ok
-            ? { ok: true as const, output: sandboxResult.output }
-            : { ok: false as const, error: `${sandboxResult.error}: ${sandboxResult.message}` };
-        })();
+  let result: { ok: true; output: string } | { ok: false; error: string };
+  let sandbox: string | undefined;
+  let codeMeta: Record<string, unknown> = {};
 
-  // 5. log decision: allow, duration, outcome.
-  logToolCall({
+  if (name === "get_time") {
+    result = { ok: true, output: new Date().toISOString() };
+  } else {
+    const code = (parsed.data as { code: string }).code;
+    codeMeta = fingerprintCode(code); // never the code itself, see below
+    const sandboxResult = await runUntrusted(code);
+    sandbox = sandboxResult.ok ? "ok" : sandboxResult.error;
+    result = sandboxResult.ok
+      ? { ok: true, output: sandboxResult.output }
+      : { ok: false, error: `${sandboxResult.error}: ${sandboxResult.message}` };
+  }
+
+  // 5. log decision: allow, duration, outcome. Never the full user code,
+  // a signature, or a session cookie, codeMeta is a length + hash
+  // fingerprint only.
+  logger.info("tool_call", {
     decision: "allow",
     tool: name,
     address,
     durationMs: Date.now() - started,
     outcome: result.ok ? "ok" : "error",
+    ...(sandbox ? { sandbox } : {}),
+    ...codeMeta,
   });
 
   return result;

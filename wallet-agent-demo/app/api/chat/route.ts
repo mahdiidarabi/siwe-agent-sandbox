@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getSession } from "@/lib/session";
 import { allowedTools } from "@/lib/authz";
 import { TOOL_DEFS, executeTool } from "@/lib/tools";
+import { createRequestLogger } from "@/lib/log";
 
 export const runtime = "nodejs";
 
@@ -11,7 +12,7 @@ const bodySchema = z.object({
 });
 
 const MAX_STEPS = 5;
-const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
@@ -51,8 +52,12 @@ function frame(event: string, data: unknown) {
 }
 
 export async function POST(request: Request) {
+  const started = Date.now();
+  const logger = createRequestLogger({ route: "/api/chat" });
+
   const session = await getSession();
   if (!session.address) {
+    logger.info("request", { status: 401, durationMs: Date.now() - started });
     return new Response(JSON.stringify({ error: "not signed in" }), {
       status: 401,
       headers: { "Content-Type": "application/json" },
@@ -69,6 +74,7 @@ export async function POST(request: Request) {
   // guard), not duplicated ad hoc per route.
   const body = bodySchema.safeParse(await request.json().catch(() => null));
   if (!body.success) {
+    logger.info("request", { status: 400, address, durationMs: Date.now() - started });
     return new Response(JSON.stringify({ error: "invalid request body" }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
@@ -203,7 +209,7 @@ export async function POST(request: Request) {
             const input = call.args ?? {};
 
             send("tool_call", { id, name, input });
-            const result = await executeTool(address, name, input);
+            const result = await executeTool(address, name, input, logger);
             send(
               "tool_result",
               result.ok
@@ -238,10 +244,16 @@ export async function POST(request: Request) {
           // naming the exact free-tier metric and project) to whoever was
           // chatting, while leaving the operator with zero visibility into
           // the same failure.
-          console.error("chat stream error:", err instanceof Error ? err.message : String(err));
+          logger.error("chat_stream_error", { address, message: err instanceof Error ? err.message : String(err) });
           send("error", { message: "something went wrong, try again" });
         }
       } finally {
+        logger.info("request", {
+          status: 200,
+          address,
+          durationMs: Date.now() - started,
+          aborted: request.signal.aborted,
+        });
         try {
           controller.close();
         } catch {
