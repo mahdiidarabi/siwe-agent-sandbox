@@ -18,6 +18,9 @@ I am learning this stack for an interview and must be able to defend every line.
 
 ## Hard constraints
 - Never suggest node:vm, vm2, or new Function for sandboxing. The sandbox is quickjs-emscripten.
-- No wagmi, no Vercel AI SDK. viem and @anthropic-ai/sdk directly.
+- No wagmi, no Vercel AI SDK. viem and the `@google/genai` SDK directly (switched from
+  @anthropic-ai/sdk, then from `openai`: no Anthropic key, then OpenAI turned out to be paid,
+  using a Gemini key instead, model gemini-3.8-flash: gemini-2.5-flash was retired for new
+  users, Google's 404 named the replacement).
 - Authorization lives in executeTool and runs on every tool call.
 - Package manager is pnpm.
