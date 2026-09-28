@@ -5,10 +5,10 @@ and one tool that runs untrusted JavaScript in a real sandbox (QuickJS/WASM), no
 tool call is authorized server side, per call, against a live role store, not just once at the
 API boundary.
 
-Setup and run instructions, and the full build narrative/phase plan, live in
-[`../README.md`](../README.md). The threat model lives in [`THREATS.md`](THREATS.md). This file
-is the technical reference: what each piece does, how they call each other, and why the code
-looks the way it does.
+The project pitch and quick-start live in [`../README.md`](../README.md). The full build plan,
+phase by phase, lives in [`../IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). The threat
+model lives in [`THREATS.md`](THREATS.md). This file is the technical reference: what each piece
+does, how they call each other, and why the code looks the way it does.
 
 ## 1. Request flow, start to finish
 
