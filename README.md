@@ -4,6 +4,9 @@ Next.js + TypeScript demo: SIWE wallet sign-in with a server-issued nonce and an
 
 **Time budget:** 4 hours. **Goal:** build it, understand every line, defend it in the 0G Labs interview.
 
+Setup and run instructions: [section 10](#10-run). Project structure, file-by-file:
+[`wallet-agent-demo/README.md`](wallet-agent-demo/README.md).
+
 ---
 
 ## 0. The ownership rule (read first)
@@ -406,14 +409,14 @@ bound to a requestId (crypto.randomUUID()).
 ```
 
 **I wire it in:**
-- [ ] Every request: `requestId`, `address`, route, status, `durationMs`
-- [ ] Every tool call: `tool`, `decision: allow|deny`, `reason` on deny, `sandbox: ok|timeout|oom|exception`, `durationMs`
-- [ ] Auth failures: specific reason in log, generic message to client
-- [ ] Never log signatures, session cookies, or full user code (log code length + hash instead)
+- [x] Every request: `requestId`, `address`, route, status, `durationMs`
+- [x] Every tool call: `tool`, `decision: allow|deny`, `reason` on deny, `sandbox: ok|timeout|oom|exception`, `durationMs`
+- [x] Auth failures: specific reason in log, generic message to client
+- [x] Never log signatures, session cookies, or full user code (log code length + hash instead)
 
 **Verify:**
-- [ ] `pnpm test` green
-- [ ] Paste one real `allow` and one real `deny` log line into section 9 of this README
+- [x] `pnpm test` green
+- [x] Paste one real `allow` and one real `deny` log line into section 9 of this README
 
 ---
 
@@ -470,17 +473,44 @@ Assets, Controls (table: threat / control / file), Known gaps, Production change
 ## 9. Example log lines
 
 ```
-(paste real allow line here)
-(paste real deny line here)
+{"ts":"2026-09-28T07:39:44.425Z","level":"info","event":"tool_call","requestId":"bb7d0f97-00a8-4695-90c5-2351dfcf945d","route":"/api/chat","decision":"allow","tool":"run_js","address":"0x0b99DE6969399246fF1901432d7fe63DAC17bF8C","durationMs":20,"outcome":"ok","sandbox":"ok","codeLength":29,"codeHash":"fab7fe11ffa9bc93"}
+{"ts":"2026-09-28T07:39:44.426Z","level":"info","event":"tool_call","requestId":"bb7d0f97-00a8-4695-90c5-2351dfcf945d","route":"/api/chat","decision":"deny","reason":"not authorized","tool":"run_js","address":"0x000000000000000000000000000000000000dEaD"}
 ```
 
 ---
 
 ## 10. Run
 
+**Prerequisites:** Node 20+, [pnpm](https://pnpm.io) (this repo pins `pnpm@11.5.2` via
+`packageManager`), a browser wallet extension (MetaMask or similar), and a free
+[Gemini API key](https://ai.google.dev/) (the app talks to Gemini, not Anthropic or
+OpenAI, see section 6's hard constraints for why).
+
 ```bash
+cd wallet-agent-demo
 pnpm install
-cp .env.example .env.local   # fill in values
-pnpm dev                     # http://localhost:3000
-pnpm test
+cp .env.example .env.local
 ```
+
+Then fill in `.env.local`:
+
+| Var | Where to get it |
+|---|---|
+| `GEMINI_API_KEY` | [ai.google.dev](https://ai.google.dev/) → Get API key. Free tier is rate-limited (as low as 5 req/min on some models), expect occasional 429s during a demo |
+| `GEMINI_MODEL` | A current Gemini model id, e.g. `gemini-2.5-flash`. Model names get retired; if you get a 404 naming a replacement, use that |
+| `SESSION_PASSWORD` | `openssl rand -hex 32`, at least 32 chars |
+| `RPC_URL` | Any public Ethereum mainnet RPC endpoint |
+| `SANDBOX_ALLOWLIST` | Your own wallet address, checksummed (comma-separated for more than one). This is what gets the `run_js` tool; a signed-in wallet **not** on this list is the "connected but not authorized" demo moment |
+| `APP_DOMAIN` / `APP_URI` / `CHAIN_ID` | Leave as `localhost:3000` / `http://localhost:3000` / `1` for local dev |
+
+```bash
+pnpm dev     # http://localhost:3000
+pnpm test    # sandbox attack tests (vitest)
+```
+
+**Demo flow:** open `http://localhost:3000`, click **Connect wallet & sign in**, approve the
+connection and the sign-in message in your wallet, you land on `/chat`. Ask it to run some
+JavaScript (`run_js`) with your allowlisted wallet, it works. Sign out, connect a *different*
+wallet not on `SANDBOX_ALLOWLIST`, ask for the same thing, it's denied, the model can still
+call `get_time` but not `run_js`, and the server log shows `decision: deny`. That contrast is
+the point of the demo, see section 9 for a real log line.
