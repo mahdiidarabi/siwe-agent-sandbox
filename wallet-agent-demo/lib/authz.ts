@@ -20,10 +20,16 @@ function loadAllowlist(): Set<Address> {
   );
 }
 
-// Parsed once at module load, but every function below re-reads it fresh
-// rather than baking a role snapshot into a session at sign-in time. That's
-// what makes this a "live" store: a revoked address stops passing canUse()
-// on its very next tool call, mid-conversation, not just on next login.
+// TODO(audit): this comment used to claim canUse() re-reads the allowlist
+// on every call, making revocation take effect "mid-conversation." That was
+// false: loadAllowlist() runs exactly once, right here, at module load.
+// process.env doesn't change at runtime without a restart, so revoking an
+// address today means editing SANDBOX_ALLOWLIST and restarting the server,
+// not the next tool call. rolesFor()/canUse() do re-check this Set on every
+// call rather than trusting a snapshot baked into the session at sign-in
+// time, which is what stops a role change from requiring the user to sign
+// out and back in, but it's still bounded by whatever was true at process
+// start.
 const sandboxAllowlist = loadAllowlist();
 
 export function rolesFor(address: Address): Role[] {
